@@ -8,7 +8,7 @@
 """
 import torch
 import torch.nn as nn
-
+import math
 
 def auto_pad(k,padding=None,d=1):
     """
@@ -26,9 +26,10 @@ def auto_pad(k,padding=None,d=1):
 
 # 普通2为卷积+bn层+激活函数的组合模块Conv
 class Conv(nn.Module):
-    def __init__(self, in_c, out_c, k, s, padding=None, g=1, d=1,act=None ):
+    default_act = nn.SiLU()
+    def __init__(self, in_c, out_c, k, s, padding=None, g=1, d=1,act=True ):
         super.__init__()
-        self.act = act if act is not None else nn.Identity()
+        self.act = self.default_act if act is True   else act  if isinstance(act, nn.Module) else nn.Identity()
         self.conv = nn.Conv2d(in_c,out_c,k,s,padding,groups=g,dilation=d,bias=False)
         self.bn = nn.BatchNorm2d(out_c)
     def forward(self,x):
@@ -72,4 +73,65 @@ class C2f(nn.Module):
         y = list(self.cv1(x).chunk(2, 1))
         y.extend(m(y[-1]) for m in self.m)
         return self.cv2(torch.cat(y, 1))
+
+class SPPF(nn.Module):
+    def __init__(self,in_c,out_c,k=5):
+        """
+        改进SPP 原先得最大池化尺寸（5，9，13）可通过3个5*5最大池化串联代替，例如9*9最大池化 可用两个5*5最大池化串联替代，
+        13*13可用3个5*5最大池化替代
+        """
+        super().__init__()
+        c_ = in_c // 2
+        self.cv1 = Conv(in_c,c_,1,1) # 1*1卷积
+        self.cv2 = Conv(c_*4,out_c,1,1)
+        self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
+    def forward(self,x):
+        y = [self.cv1(x)]
+        y.extend(self.m(y[-1]) for _ in range(3))
+        return self.cv2(torch.cat(y,1))
+# 分组卷积
+class DWConv(Conv):
+    def __init__(self, in_c, out_c, k=1, s=1, padding=None, d=1,act=True ):
+        super().__init__( in_c, out_c, k, s,padding=padding,g=math.gcd(in_c,out_c),d=d,act=act)
+
+
+
+class Detect(nn.Module):
+    def __init__(self,nc=80,ch=()):
+        super().__init__()
+        self.nc = nc  # number of classes
+        self.nl = len(ch)  # number of detection layers
+        self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
+        self.no = nc + self.reg_max * 4  # number of outputs per anchor
+
+        self.stride = torch.zeros(self.nl)  # strides computed during build
+
+        c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], min(self.nc, 100))  # channels
+
+        # 回归分支
+        self.cv2 = nn.ModuleList(
+            nn.Sequential(Conv(x, c2, 3), Conv(c2, c2, 3), nn.Conv2d(c2, 4 * self.reg_max, 1)) for x in ch
+        )
+
+        # 类别分支
+        self.cv3 = (
+            nn.ModuleList(
+                nn.Sequential(
+                    nn.Sequential(DWConv(x, x, 3), Conv(x, c3, 1)),
+                    nn.Sequential(DWConv(c3, c3, 3), Conv(c3, c3, 1)),
+                    nn.Conv2d(c3, self.nc, 1),
+                )
+                for x in ch
+            )
+        )
+    def forward(self,x):
+        for i in range(self.nl):
+            x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
+        # if self.training:
+        return x
+        # y = self._inference(x)
+        # return y if self.export else (y,x)
+
+
+
 
