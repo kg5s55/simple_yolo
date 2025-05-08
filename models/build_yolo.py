@@ -17,8 +17,10 @@ from models.common import (
     DWConv,
     C2f,
     Detect,
-    SPPF
+    SPPF,
+    Concat
 )
+
 def parse_cfg(cfg):
     if isinstance(cfg,str):
         with open(cfg,"r") as f:
@@ -53,7 +55,6 @@ def build_model(cfg):
         if not scale:
             scale  = tuple(scales.keys())[0]
             depth, width, max_channels = scales[scale]
-
     # 激活函数选择
     if act:
         Conv.default_act = eval(act)
@@ -64,7 +65,8 @@ def build_model(cfg):
         for j, a in enumerate(args):
             if isinstance(a, str):
                 try:
-                    args[j] = locals()[a] if a in locals() else ast.literal_eval(a)
+                    args[j] = locals()[a] if a in locals() else ast.literal_eval(a) # 'None'-->None
+                    print(args[j],"ok",args,i,j)
                 except ValueError:
                     pass
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
@@ -80,5 +82,26 @@ def build_model(cfg):
             }:
                 args.insert(2, n)  # number of repeats
                 n = 1
-            elif m is nn.BatchNorm2d:
-                args = [ch[f]]
+        elif m is nn.BatchNorm2d:
+            args = [ch[f]]
+        elif m is Concat:
+            c2 = sum(ch[x] for x in f)
+        elif m is Detect:
+            args.append([ch[x] for x in f])
+        else:
+            c2 = ch[f]
+        m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
+        t = str(m)[8:-2].replace("__main__.", "")  # module type
+        m_.np = sum(x.numel() for x in m_.parameters())  # number params
+        m_.i, m_.f, m_.type = i, f, t  # attach index, 'from' index, type
+        save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
+        layers.append(m_)
+        if i == 0:
+            ch = []
+        ch.append(c2)
+    return nn.Sequential(*layers), sorted(save)
+
+if __name__ == "__main__":
+    # print(globals())
+    # print(locals())
+    build_model("yolov8.yaml")

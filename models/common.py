@@ -6,6 +6,8 @@
 @Author  ：kg5s55
 @Description: 
 """
+from modulefinder import Module
+
 import torch
 import torch.nn as nn
 import math
@@ -27,8 +29,8 @@ def auto_pad(k,padding=None,d=1):
 # 普通2为卷积+bn层+激活函数的组合模块Conv
 class Conv(nn.Module):
     default_act = nn.SiLU()
-    def __init__(self, in_c, out_c, k, s, padding=None, g=1, d=1,act=True ):
-        super.__init__()
+    def __init__(self, in_c, out_c, k=1, s=1, padding=None, g=1, d=1,act=True ):
+        super().__init__()
         self.act = self.default_act if act is True   else act  if isinstance(act, nn.Module) else nn.Identity()
         self.conv = nn.Conv2d(in_c,out_c,k,s,padding,groups=g,dilation=d,bias=False)
         self.bn = nn.BatchNorm2d(out_c)
@@ -133,5 +135,11 @@ class Detect(nn.Module):
         # return y if self.export else (y,x)
 
 
-
+# concat
+class Concat(nn.Module):
+    def __init__(self,dim=1):
+        super().__init__()
+        self.dim = dim
+    def forward(self,x):
+        return torch.cat(x,self.dim)
 
