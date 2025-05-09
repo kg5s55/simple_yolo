@@ -6,7 +6,7 @@
 @Author  ：kg5s55
 @Description: 
 """
-import os
+# import os
 import yaml
 import torch
 import ast
@@ -41,6 +41,7 @@ def make_divisible(x, divisor):
     if isinstance(divisor, torch.Tensor):
         divisor = int(divisor.max())  # to int
     return math.ceil(x / divisor) * divisor
+
 def build_model(cfg):
     cfg = parse_cfg(cfg)
     ch = cfg['ch']
@@ -60,15 +61,17 @@ def build_model(cfg):
         Conv.default_act = eval(act)
     ch = [ch]
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
+    param = []
     for i, (f, n, m, args) in enumerate(cfg["backbone"] + cfg["head"]):  # from, number, module, args
         m = getattr(torch.nn, m[3:]) if "nn." in m else globals()[m]  # get module
         for j, a in enumerate(args):
             if isinstance(a, str):
                 try:
-                    args[j] = locals()[a] if a in locals() else ast.literal_eval(a) # 'None'-->None
-                    print(args[j],"ok",args,i,j)
+                    args[j] = locals()[a] if a in locals() else ast.literal_eval(a) # 'None'-->
+                    # print(args[j],"ok",args,i,j)
                 except ValueError:
                     pass
+        # 参数n的更新
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
         if m in {
             Conv , SPPF,DWConv,C2f
@@ -93,15 +96,18 @@ def build_model(cfg):
         m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace("__main__.", "")  # module type
         m_.np = sum(x.numel() for x in m_.parameters())  # number params
+        param.append({m:m_.np})
         m_.i, m_.f, m_.type = i, f, t  # attach index, 'from' index, type
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         if i == 0:
             ch = []
         ch.append(c2)
+    print(param)
     return nn.Sequential(*layers), sorted(save)
 
 if __name__ == "__main__":
     # print(globals())
     # print(locals())
-    build_model("yolov8.yaml")
+    model,_ = build_model("yolov8.yaml")
+
