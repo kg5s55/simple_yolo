@@ -10,12 +10,15 @@ import os
 import glob
 from pathlib import Path
 import numpy as np
-
+from copy import deepcopy
 from itertools import repeat
 from multiprocessing.pool import ThreadPool
 from torch.utils.data import Dataset
 from PIL import Image
 from tqdm import tqdm
+import cv2
+import math
+
 IMG_FORMATS = {"bmp", "dng", "jpeg", "jpg", "mpo", "png", "tif", "tiff", "webp", "pfm"}  # image suffixes
 NUM_THREADS = min(8, max(1, os.cpu_count() - 1))  # number of YOLO multiprocessing threads
 
@@ -78,12 +81,15 @@ class YOLODataset(Dataset):
         super().__init__()
         self.img_path = img_path
         self.imgsz = imgsz
+        # if isinstance(self.imgsz, int):
+        #     self.imgsz = [self.imgsz, self.imgsz]
+
         self.augment = augment
         self.single_cls = single_cls
         self.batch_size = batch_size
         self.stride = stride
-        self.im_files = self.get_img_files(self.img_path)
-        self.labels = self.get_labels()
+        self.im_files = self.get_img_files(self.img_path)  # img_file的列表
+        self.labels = self.get_labels()  # 得到img_file 对应的标签信息
 
         self.transforms = self.build_transforms(hyp=hyp)
 
@@ -92,6 +98,7 @@ class YOLODataset(Dataset):
 
     def get_labels(self, ):
         x = {"labels": []}
+        # img--> label_path
         self.label_files = img2label_paths(self.im_files)
         total = len(self.im_files)
 
@@ -120,8 +127,7 @@ class YOLODataset(Dataset):
                         }
                     )
             pbar.close()
-
-
+        return x
         #
         # try:
         #     # Verify images
@@ -134,7 +140,7 @@ class YOLODataset(Dataset):
                 p = Path(p)  # os-agnostic
                 if p.is_dir():  # dir
                     f += glob.glob(str(p / "**" / "*.*"), recursive=True)
-                elif p.is_file():  # file
+                elif p.is_file():  # file txt作为img_path
                     with open(p) as t:
                         t = t.read().strip().splitlines()
                         parent = str(p.parent) + os.sep
@@ -149,7 +155,25 @@ class YOLODataset(Dataset):
         return im_files
 
     def get_image_and_label(self, index):
-        pass
+        label = deepcopy(self.labels[index])  # requires deepcopy() https://github.com/ultralytics/ultralytics/pull/1948
+        label["img"], label["ori_shape"], label["resized_shape"] = self.load_image(index)
+        label["ratio_pad"] = (
+            label["resized_shape"][0] / label["ori_shape"][0],
+            label["resized_shape"][1] / label["ori_shape"][1],
+        )  # for evaluation
+        return label
+
+    def load_image(self, index):
+
+        im = cv2.imread(self.im_files[index])
+        if im is None:
+            raise FileNotFoundError(f"Image Not Found {self.im_files[index]}")
+        h0, w0 = im.shape[:2]  # orig hw
+        r = self.imgsz / max(h0, w0)
+        if r != 1:
+            w, h = (min(math.ceil(w0 * r), self.imgsz), min(math.ceil(h0 * r), self.imgsz))
+            im = cv2.resize(im, (w, h), interpolation=cv2.INTER_LINEAR)
+        return im, (h0, w0), im.shape[:2]
 
     def __getitem__(self, index):
         return self.transforms(self.get_image_and_label(index))

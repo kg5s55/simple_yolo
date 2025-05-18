@@ -21,12 +21,15 @@ from models.common import (
     Concat
 )
 
+
 def parse_cfg(cfg):
-    if isinstance(cfg,str):
-        with open(cfg,"r") as f:
+    if isinstance(cfg, str):
+        with open(cfg, "r") as f:
             cfg = yaml.safe_load(f)
     # print(cfg)
     return cfg
+
+
 def make_divisible(x, divisor):
     """
     Returns the nearest number that is divisible by the given divisor.
@@ -42,6 +45,7 @@ def make_divisible(x, divisor):
         divisor = int(divisor.max())  # to int
     return math.ceil(x / divisor) * divisor
 
+
 def build_model(cfg):
     cfg = parse_cfg(cfg)
     ch = cfg['ch']
@@ -54,7 +58,7 @@ def build_model(cfg):
     if scales:
         scale = cfg.get("scale")
         if not scale:
-            scale  = tuple(scales.keys())[0]
+            scale = tuple(scales.keys())[0]
             depth, width, max_channels = scales[scale]
     # 激活函数选择
     if act:
@@ -67,16 +71,16 @@ def build_model(cfg):
         for j, a in enumerate(args):
             if isinstance(a, str):
                 try:
-                    args[j] = locals()[a] if a in locals() else ast.literal_eval(a) # 'None'-->
+                    args[j] = locals()[a] if a in locals() else ast.literal_eval(a)  # 'None'-->
                     # print(args[j],"ok",args,i,j)
                 except ValueError:
                     pass
         # 参数n的更新
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
         if m in {
-            Conv , SPPF,DWConv,C2f
+            Conv, SPPF, DWConv, C2f
         }:
-            c1, c2 = ch[f], args[0] #输入输出通道
+            c1, c2 = ch[f], args[0]  # 输入输出通道
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
             args = [c1, c2, *args[1:]]
@@ -96,7 +100,7 @@ def build_model(cfg):
         m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace("__main__.", "")  # module type
         m_.np = sum(x.numel() for x in m_.parameters())  # number params
-        param.append({m:m_.np})
+        param.append({m: m_.np})
         m_.i, m_.f, m_.type = i, f, t  # attach index, 'from' index, type
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
@@ -106,8 +110,8 @@ def build_model(cfg):
     print(param)
     return nn.Sequential(*layers), sorted(save)
 
+
 if __name__ == "__main__":
     # print(globals())
     # print(locals())
-    model,_ = build_model("yolov8.yaml")
-
+    model, _ = build_model("yolov8.yaml")
